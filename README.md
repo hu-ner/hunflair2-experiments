@@ -39,7 +39,10 @@ See the paper for more details.
 You can obtain the predictions from our HunFlair2 tool with the following command:
 
 ```bash
-python predict_hunflair2.py --out /path/to/out
+python predict_hunflair2.py \
+    --input ./annotations/raw/bioid_text.txt \
+    --output ./annotations/hunflair2/bioid_text.txt \
+    --entity_types species
 ```
 
-This will load plain text files from `annotations/raw` and store the predictions into the `--out` folder
+This will load a file in the PubTator formatand store the predictions into the `--output` file
