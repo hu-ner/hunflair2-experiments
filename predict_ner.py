@@ -182,7 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--input_dataset", default="bionlp_st_2013_cg")
     parser.add_argument(
         "--model",
-        default="/home/hunflair2/best-model.pt",
+        default="xdawang/hunflair2",
     )
     parser.add_argument(
         "--output_file",
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--entity_types",
         nargs="*",
-        default=["diseases"],
+        default=["cell lines", "chemicals", "diseases", "genes", "species"],
     )
     parser.add_argument("--predict_test_only", action="store_true", default=False)
     parser.add_argument("--single", action="store_true", default=False)
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     output_file = Path(args.output_file)
     os.makedirs(str(output_file.parent), exist_ok=True)
 
-    HunFlairPredictor(
+    predictor = HunFlairPredictor(
         args.input_dataset,
         args.model,
         output_file,
@@ -210,3 +210,5 @@ if __name__ == "__main__":
         args.predict_test_only,
         args.single,
     )
+
+    # predictor.model.push_to_hub("xdawang/hunflair2")

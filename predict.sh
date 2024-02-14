@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python predict_ner.py --input_dataset pdr --model xdawang/hunflair2 --output_file data/pdr/hunflair_v2_all_aio_biored_check.txt
