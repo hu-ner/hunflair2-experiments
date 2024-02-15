@@ -5,6 +5,7 @@ Utilities to load data
 
 import re
 from collections import OrderedDict, defaultdict
+import itertools
 from pathlib import Path
 from typing import Dict, List, Tuple, cast
 
@@ -362,3 +363,222 @@ def read_documents_from_pubtator(
     ]
 
     return documents
+
+
+class Metric:
+    def __init__(self, name, beta=1):
+        self.name = name
+        self.beta = beta
+
+        self._tps = defaultdict(lambda: defaultdict(int))
+        self._fps = defaultdict(lambda: defaultdict(int))
+        self._tns = defaultdict(lambda: defaultdict(int))
+        self._fns = defaultdict(lambda: defaultdict(int))
+
+        self.entity_type_to_mention_count: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+        self.entity_type_count: Dict[str, int] = defaultdict(int)
+
+    def add_tp(self, class_name, mention=None):
+        self._tps[class_name][mention] += 1
+
+    def add_tn(self, class_name, mention=None):
+        self._tns[class_name][mention] += 1
+
+    def add_fp(self, class_name, mention=None):
+        self._fps[class_name][mention] += 1
+
+    def add_fn(self, class_name, mention=None):
+        self._fns[class_name][mention] += 1
+
+    def get_ftnp(self, ftnp, class_name=None, mention=None):
+        if class_name is None and mention is None:
+            return sum(
+                [
+                    ftnp[class_name][mention]
+                    for class_name in self.get_classes()
+                    for mention in self.get_mentions(class_name)
+                ]
+            )
+        elif mention is None:
+            return sum([ftnp[class_name][mention] for mention in ftnp[class_name]])
+        else:
+            return ftnp[class_name][mention]
+
+    def get_tp(self, class_name=None, mention=None):
+        return self.get_ftnp(self._tps, class_name, mention)
+
+    def get_tn(self, class_name=None, mention=None):
+        return self.get_ftnp(self._tns, class_name, mention)
+
+    def get_fp(self, class_name=None, mention=None):
+        return self.get_ftnp(self._fps, class_name, mention)
+
+    def get_fn(self, class_name=None, mention=None):
+        return self.get_ftnp(self._fns, class_name, mention)
+
+    def precision(self, class_name=None, mention=None):
+        if self.get_tp(class_name, mention) + self.get_fp(class_name, mention) > 0:
+            return self.get_tp(class_name, mention) / (
+                self.get_tp(class_name, mention) + self.get_fp(class_name, mention)
+            )
+        return 0.0
+
+    def recall(self, class_name=None, mention=None):
+        if self.get_tp(class_name, mention) + self.get_fn(class_name, mention) > 0:
+            return self.get_tp(class_name, mention) / (
+                self.get_tp(class_name, mention) + self.get_fn(class_name, mention)
+            )
+        return 0.0
+
+    def f_score(self, class_name=None, mention=None):
+        # if self.precision(class_name, mention) + self.recall(class_name, mention) > 0:
+        return (
+            (1 + self.beta * self.beta)
+            * (self.precision(class_name, mention) * self.recall(class_name, mention))
+            / (
+                self.precision(class_name, mention) * self.beta * self.beta
+                + self.recall(class_name, mention)
+            )
+        )
+        # return 0.0
+
+    def accuracy(self, class_name=None, mention=None):
+        if (
+            self.get_tp(class_name, mention)
+            + self.get_fp(class_name, mention)
+            + self.get_fn(class_name, mention)
+            + self.get_tn(class_name, mention)
+            > 0
+        ):
+            return (
+                self.get_tp(class_name, mention) + self.get_tn(class_name, mention)
+            ) / (
+                self.get_tp(class_name, mention)
+                + self.get_fp(class_name, mention)
+                + self.get_fn(class_name, mention)
+                + self.get_tn(class_name, mention)
+            )
+        return 0.0
+
+    def mention_macro_avg_f_score(self, class_name=None):
+        class_precisions = [
+            self.precision(class_name, mention)
+            for mention in self.get_mentions(class_name)
+        ]
+        class_recalls = [
+            self.recall(class_name, mention)
+            for mention in self.get_mentions(class_name)
+        ]
+        macro_precision = sum(class_precisions) / len(class_precisions)
+        macro_recall = sum(class_recalls) / len(class_recalls)
+        # print(macro_precision, macro_recall)
+        # print(class_precisions, class_recalls)
+        if (
+            len(class_precisions) == 0
+            or len(class_recalls) == 0
+            or (macro_precision + macro_recall) == 0
+        ):
+            return 0.0
+        macro_f_score = (
+            (1 + self.beta * self.beta)
+            * (macro_precision * macro_recall)
+            / (macro_precision * self.beta * self.beta + macro_recall)
+        )
+        return macro_f_score
+
+    def entity_macro_avg_f_score(self):
+        class_precisions = [self.precision(c) for c in self.get_classes()]
+        class_recalls = [self.recall(c) for c in self.get_classes()]
+
+        macro_precision = sum(class_precisions) / len(class_precisions)
+        macro_recall = sum(class_recalls) / len(class_recalls)
+        # print(macro_precision, macro_recall)
+        # print(class_precisions, class_recalls)
+        if (
+            len(class_precisions) == 0
+            or len(class_recalls) == 0
+            or (macro_precision + macro_recall) == 0
+        ):
+            return 0.0
+        macro_f_score = (
+            (1 + self.beta * self.beta)
+            * (macro_precision * macro_recall)
+            / (macro_precision * self.beta * self.beta + macro_recall)
+        )
+        return macro_f_score
+
+    def micro_avg_f_score(self):
+        return self.f_score(None)
+
+    def macro_avg_f_score(self):
+        class_f_scores = [self.f_score(class_name) for class_name in self.get_classes()]
+        if len(class_f_scores) == 0:
+            return 0.0
+        macro_f_score = sum(class_f_scores) / len(class_f_scores)
+        return macro_f_score
+
+    def micro_avg_accuracy(self):
+        return self.accuracy(None)
+
+    def macro_avg_accuracy(self):
+        class_accuracy = [
+            self.accuracy(class_name) for class_name in self.get_classes()
+        ]
+
+        if len(class_accuracy) > 0:
+            return sum(class_accuracy) / len(class_accuracy)
+
+        return 0.0
+
+    def get_classes(self) -> List:
+        all_classes = set(
+            itertools.chain(
+                *[
+                    list(keys)
+                    for keys in [
+                        self._tps.keys(),
+                        self._fps.keys(),
+                        self._tns.keys(),
+                        self._fns.keys(),
+                    ]
+                ]
+            )
+        )
+        all_classes = [
+            class_name for class_name in all_classes if class_name is not None
+        ]
+        all_classes.sort()
+        return all_classes
+
+    def get_mentions(self, class_name) -> List:
+        all_mentions = set(
+            list(self._tps[class_name].keys())
+            + list(self._fps[class_name].keys())
+            + list(self._tns[class_name].keys())
+            + list(self._fns[class_name].keys())
+        )
+        all_mentions = [mention for mention in all_mentions if mention is not None]
+        all_mentions.sort()
+        return all_mentions
+
+    def __str__(self):
+        all_classes = self.get_classes()
+        all_classes = [None] + all_classes
+        all_lines = [
+            "{0:<10}\tsup: {1} - tp: {2} - fp: {3} - fn: {4} - tn: {5} - precision: {6:.4f} - recall: {7:.4f} - accuracy: {8:.4f} - f1-score: {9:.4f}".format(
+                self.name if class_name is None else class_name,
+                self.get_tp(class_name) + self.get_fn(class_name),
+                self.get_tp(class_name),
+                self.get_fp(class_name),
+                self.get_fn(class_name),
+                self.get_tn(class_name),
+                self.precision(class_name),
+                self.recall(class_name),
+                self.accuracy(class_name),
+                self.f_score(class_name),
+            )
+            for class_name in all_classes
+        ]
+        return "\n".join(all_lines)

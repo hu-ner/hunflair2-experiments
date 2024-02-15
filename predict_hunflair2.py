@@ -1,4 +1,5 @@
 import argparse
+from collections import defaultdict
 import time
 from typing import Dict, List, Tuple
 
@@ -53,18 +54,109 @@ def get_document_text(document: pubtator.PubTator) -> str:
     return text
 
 
-def get_pmid_sentence_list(
+def get_sentences(
     documents: Dict[str, pubtator.PubTator], splitter: SentenceSplitter
 ) -> List[Tuple[str, Sentence]]:
-    pmid_sentence_list = []
+    sentences = []
     for pmid, document in documents.items():
         for s in splitter.split(get_document_text(document)):
-            pmid_sentence_list.append((pmid, s))
+            sentences.append((pmid, s))
+    return sentences
 
-    return pmid_sentence_list
+
+def run_ner(
+    tagger: PrefixedSequenceTagger,
+    documents: Dict[str, pubtator.PubTator],
+    batch_size: int,
+):
+    splitter = SciSpacySentenceSplitter()
+
+    print("- start entity recognition")
+    start = time.time()
+
+    pmid_sentence = get_sentences(documents=documents, splitter=splitter)
+    pmids, sentences = zip(*pmid_sentence)
+    sentences = list(sentences)
+
+    tagger.predict(sentences, mini_batch_size=batch_size)
+    elapsed = round(time.time() - start, 2)
+    print(f"- entity recognition took: {elapsed}s")
+
+    for pmid, sentence in zip(pmids, sentences):
+        for span in sentence.get_spans("ner"):
+            annotation = pubtator.PubTatorAnn(
+                pmid=pmid,
+                text=span.text,
+                start=span.start_position + sentence.start_position,
+                end=span.end_position + sentence.start_position,
+                type=span.tag.lower(),
+                id=-1,
+            )
+            documents[pmid].add_annotation(annotation)
+
+    for _, document in documents.items():
+        document.annotations = sorted(document.annotations, key=lambda x: x.start)
+
+
+def run_nen(
+    linkers: Dict[str, EntityMentionLinker],
+    documents: Dict[str, pubtator.PubTator],
+    batch_size: int,
+):
+    print("- start entity linking")
+    start = time.time()
+
+    texts = {
+        pmid: Sentence(get_document_text(document))
+        for pmid, document in documents.items()
+    }
+
+    linker = list(linkers.values())[0]
+    linker.preprocessor.initialize(list(texts.values()))
+    for other_linker in list(linkers.values())[1:]:
+        other_linker.preprocessor.abbreviation_dict = (
+            linker.preprocessor.abbreviation_dict
+        )
+
+    for entity_type, linker in linkers.items():
+        annotations = []
+        annotations_text = []
+        for pmid, document in documents.items():
+            for a in document.annotations:
+                if a.type.lower() == entity_type:
+                    annotations.append(a)
+                    annotations_text.append(
+                        linker.preprocessor.process_mention(
+                            entity_mention=a.text, sentence=texts[pmid]
+                        )
+                    )
+
+        for i in range(0, len(annotations), batch_size):
+            batch_annotations = annotations[i : i + batch_size]
+            batch_annotations_text = annotations_text[i : i + batch_size]
+
+            batch_candidates = linker.candidate_generator.search(
+                entity_mentions=batch_annotations_text, top_k=1
+            )
+
+            assert len(batch_annotations_text) == len(batch_candidates), (
+                f"# of mentions ({len(batch_annotations_text)}) !="
+                + f" # of search results ({len(batch_candidates)})!"
+            )
+
+            for a, mention_candidates in zip(batch_annotations, batch_candidates):
+                if len(mention_candidates) > 0:
+                    top_candidate = mention_candidates[0]
+                    a.id = top_candidate[0]
+
+    elapsed = round(time.time() - start, 2)
+    print(f"- entity linking took: {elapsed}s")
 
 
 def main(args: argparse.Namespace):
+    assert (
+        len(args.entity_types) > 0
+    ), "You must provide at least one entity type `--entity_types`"
     assert all(
         et in ENTITY_TYPES for et in args.entity_types
     ), f"There are invalid entity types. All must be one one of: {ENTITY_TYPES}"
@@ -72,41 +164,21 @@ def main(args: argparse.Namespace):
     print("Start predicting with Hunflair2:")
     print(f"- input file: {args.input}")
     print(f"- output file: {args.output}")
-    print("- load NER model")
-    splitter = SciSpacySentenceSplitter()
-    tagger = PrefixedSequenceTagger.load("hunflair/hunflair2-ner")
-    print(f"- load EL models: {args.entity_types}")
-    linkers = [EntityMentionLinker.load(f"{et}-linker") for et in args.entity_types]
+
     documents = load_documents(args.input)
-    print("- split documents into sentences")
-    pmid_sentence = get_pmid_sentence_list(documents=documents, splitter=splitter)
-    pmids, sentences = zip(*pmid_sentence)
-    sentences = list(sentences)
 
-    print("- start tagging")
-    start = time.time()
-    tagger.predict(sentences, mini_batch_size=args.batch_size)
-    for linker in linkers:
-        linker.predict(sentences, batch_size=args.batch_size)
-    elapsed = round(time.time() - start, 2)
-    print(f"- tagging took: {elapsed}s")
+    print("- load entity recognition model")
+    tagger = PrefixedSequenceTagger.load("hunflair/hunflair2-ner")
+    run_ner(tagger=tagger, documents=documents, batch_size=args.batch_size)
 
-    print("- write output file")
-    for pmid, sentence in zip(pmids, sentences):
-        for span in sentence.get_spans("ner"):
-            for link in span.get_labels("link"):
-                annotation = pubtator.PubTatorAnn(
-                    pmid=pmid,
-                    text=span.text,
-                    start=span.start_position,
-                    end=span.end_position,
-                    type=span.tag.lower(),
-                    id=link.value,
-                )
-                documents[pmid].add_annotation(annotation)
+    print(f"- load entity linking models: {args.entity_types}")
+    linkers = {et: EntityMentionLinker.load(f"{et}-linker") for et in args.entity_types}
+    run_nen(linkers=linkers, documents=documents, batch_size=args.batch_size)
+
+    with open(args.output, "w") as fp:
+        pubtator.dump(documents.values(), fp)
+
     print("- done")
-
-    breakpoint()
 
 
 if __name__ == "__main__":

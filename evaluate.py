@@ -7,9 +7,7 @@ import random
 from typing import Dict, List
 
 import pandas as pd
-
-from evaluate_annotation import Metric
-from utils import load_bern, load_pubtator
+from utils import Metric, load_bern, load_pubtator
 
 DISEASE = "disease"
 CHEMICAL = "chemical"
@@ -292,11 +290,11 @@ def get_main_result_table(results: Results, only_f1: bool = True):
 
                 if method == "SciSpacy" and corpus == "tmvar_v3":
                     if not only_f1:
-                        out[method]["P"][key] = pd.NA
-                        out[method]["R"][key] = pd.NA
-                        out[method]["F1"][key] = pd.NA
+                        out[method]["P"][key] = 0.0
+                        out[method]["R"][key] = 0.0
+                        out[method]["F1"][key] = 0.0
                     else:
-                        out[method][key] = pd.NA
+                        out[method][key] = 0.0
                 else:
                     if not only_f1:
                         out[method]["P"][key] = metric.precision() * 100
@@ -306,7 +304,7 @@ def get_main_result_table(results: Results, only_f1: bool = True):
                         try:
                             out[method][key] = metric.f_score()
                         except ZeroDivisionError:
-                            out[method][key] = pd.NA
+                            out[method][key] = 0.0
     if not only_f1:
         out = {k: pd.DataFrame(v) for k, v in out.items()}
 
@@ -469,6 +467,7 @@ def main():
         "pubtator": "PubTator",
         "scispacy": "SciSpacy",
         "bent": "bent",
+        "hunflair2": "HunFlair2",
     }
 
     gold = load_gold(corpora=CORPORA)
@@ -479,11 +478,10 @@ def main():
         path=os.path.join(os.getcwd(), "annotations"),
     )
 
-    # evaluate_chemical_ctd_only(gold=gold, preds=preds)
-
     ml_results = evaluate_mention_level(gold=gold, preds=preds)
     ml_df = get_main_result_table(ml_results)
     ml_df.rename(METHODS, inplace=True, axis=1)
+    ml_df = ml_df.round(2)
     print(ml_df)
 
 
