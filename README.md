@@ -27,7 +27,7 @@ Results are computed on the following corpora:
 We obtiained the prediction and stored them in the [pubtator format](https://www.ncbi.nlm.nih.gov/CBBresearch/Lu/Demo/tmTools/Format.html)
 in the `annotations` folder for the following tools:
 
-- [PubTator](https://www.ncbi.nlm.nih.gov/research/pubtator/api.html)
+- [PubTator Central](https://www.ncbi.nlm.nih.gov/research/pubtator/api.html)
 - [BERN2](https://github.com/dmis-lab/BERN2)
 - [SciSpacy](https://github.com/allenai/scispacy)
 - [bent](https://github.com/lasigeBioTM/bent)

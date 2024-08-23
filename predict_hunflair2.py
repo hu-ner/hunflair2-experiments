@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
         "--batch_size",
         type=int,
         default=64,
-        help="Number of sentences to process in one go",
+        help="Number of sentences to precess in one go",
     )
     return parser.parse_args()
 
@@ -68,7 +68,6 @@ def run_ner(
     tagger: PrefixedSequenceTagger,
     documents: Dict[str, pubtator.PubTator],
     batch_size: int,
-    verbose: bool = True
 ):
     splitter = SciSpacySentenceSplitter()
 
@@ -79,7 +78,7 @@ def run_ner(
     pmids, sentences = zip(*pmid_sentence)
     sentences = list(sentences)
 
-    tagger.predict(sentences, mini_batch_size=batch_size, verbose=verbose)
+    tagger.predict(sentences, mini_batch_size=batch_size)
     elapsed = round(time.time() - start, 2)
     print(f"- entity recognition took: {elapsed}s")
 

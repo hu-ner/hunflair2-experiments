@@ -1,4 +1,5 @@
-flair @ git+https://github.com/flairNLP/flair
+flair==0.14.0
 bioc==2.1
 scispacy==0.5.1
 https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.1/en_core_sci_sm-0.5.1.tar.gz
+datasets==2.20.0
